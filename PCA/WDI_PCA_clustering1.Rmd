@@ -1,0 +1,164 @@
+---
+title: "PCA with Clustering"
+author: "Michael Shieh"
+date: "12/4/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+data <- read.csv("HDIdata_new.csv")
+str(data)
+```
+```{r}
+require(dplyr)
+col_test <- apply(data[,3:length(data)], 2, function(x) sum(is.na(x)))
+col_test <- col_test/nrow(data)
+
+data_test <- cbind(data[,1:2], data %>% select(names(col_test[col_test < 0.3])))
+head(data_test[5:10,])
+
+#Changes need to be applied here as well
+```
+Now, we can check how the function works and look at the resulting data frame:
+Basic tests on regression modelling:
+```{r}
+# remove first four rows for analysis
+#cleanData <- data_test[,4:length(data_test)]
+indexClean <- which(complete.cases(data_test)==TRUE)
+newCleanData <- data_test[indexClean,]
+
+# setting up dependent variable: NY.GDP.PCAP.KD.ZG
+#Y <- newCleanData[, 31]
+Y <- newCleanData[, 34]
+
+# removing all GDP measures from independent variables set
+#X <- newCleanData[, -(26:33)]
+X <- newCleanData[, -(29:35)]
+
+require(mclust)
+PCA.Mclust <- Mclust(X, G=4)
+X <- data.frame(PCA.Mclust$classification, X)
+names(X)[1] <- c("Class")
+X <- X[, -(2:4)]
+
+# Bring the variables together 
+analysis_data <- data.frame(Y,X)
+names(analysis_data)[1] = c("GDP")
+
+# Create a training data (80% the original data size)
+train.ix <- sample(nrow(analysis_data),floor(nrow(analysis_data)*0.8))
+data.train <- analysis_data[train.ix,]
+
+# Create a testing data (20% the original data size)
+data.test <- analysis_data[-train.ix,]
+
+# Format data for glmnet package
+# Training:
+trainY <- as.matrix(data.train[,1])
+colnames(trainY) <- names(data.train)[1]
+
+trainX <- data.train[, -1]
+names(trainX) <- names(data.train)[2:length(data.train)]
+
+# Testing:
+testY <- as.matrix(data.test[, 1])
+colnames(testY) <- names(data.test)[1]
+
+testX <- data.test[, -1]
+names(testX) <- names(data.train)[2:length(data.test)]
+```
+
+```{r}
+require(FactoMineR)
+pca <- PCA(trainX,  graph = FALSE, ncp = 10)
+require(factoextra)
+fviz_screeplot(pca, addlabels = TRUE, ylim = c(0, 50))
+var <- get_pca_var(pca)
+head(var$contrib)
+fviz_contrib(pca, choice = "var", axes = 1, top = 20)
+fviz_contrib(pca, choice = "var", axes = 2, top = 20)
+fviz_contrib(pca, choice = "var", axes = 3, top = 20)
+```
+
+```{r}
+trainX <- pca$ind$coord # Do transformation of the X matrix of training data
+trainX <- data.frame(trainX)
+names(trainX) <- c("PC1","PC2","PC3","PC4","PC5","PC6","PC7","PC8","PC9","PC10")
+testX <- predict(pca, newdata = testX) # Do transformation of the X matrix of testing data
+testX <- data.frame(testX$coord)
+names(testX) <- c("PC1","PC2","PC3","PC4","PC5","PC6","PC7","PC8","PC9","PC10")
+
+tempData <- data.frame(trainY,trainX)
+names(tempData)[1] <- c("MMSCORE")
+lm <- lm(MMSCORE ~ ., data = tempData)
+summary(lm)
+
+y_hat <- predict(lm, testX) 
+cor(y_hat, testY) #For regression model, you can use correlation to measure how close your predictions with the true outcome values of the data points 
+mse <- mean((y_hat - testY)^2) # Another metric is the mean squared error (mse)
+mse
+```
+
+#Let's try clustering
+```{r}
+require(FactoMineR)
+require(factoextra)
+
+cor = NULL
+mse = NULL
+
+for(n in 1:4){
+  # Create a training data (80% the original data size)
+  analysis_data.Cluster <- analysis_data[analysis_data$Class == n, ]
+  train.ix <- sample(nrow(analysis_data.Cluster),floor(nrow(analysis_data.Cluster)*0.8))
+  data.train <- analysis_data.Cluster[train.ix,]
+
+  # Create a testing data (20% the original data size)
+  data.test <- analysis_data.Cluster[-train.ix,]
+
+  # Format data for glmnet package
+  # Training:
+  trainY <- as.matrix(data.train[,1])
+  colnames(trainY) <- names(data.train)[1]
+
+  trainX <- data.train[, -1]
+  names(trainX) <- names(data.train)[2:length(data.train)]
+
+  # Testing:
+  testY <- as.matrix(data.test[, 1])
+  colnames(testY) <- names(data.test)[1]
+
+  testX <- data.test[, -1]
+  names(testX) <- names(data.train)[2:length(data.test)]
+  
+  pca <- PCA(trainX, graph = FALSE, ncp = 10)
+  fviz_screeplot(pca, addlabels = TRUE, ylim = c(0, 50))
+  var <- get_pca_var(pca)
+  head(var$contrib)
+  fviz_contrib(pca, choice = "var", axes = 1, top = 20)
+  #fviz_contrib(pca, choice = "var", axes = 2, top = 20)
+  #fviz_contrib(pca, choice = "var", axes = 3, top = 20)
+  
+  trainX <- pca$ind$coord
+  trainX <- data.frame(trainX)
+  names(trainX) <- c("PC1","PC2","PC3","PC4","PC5","PC6","PC7","PC8","PC9","PC10")
+  testX <- predict(pca, newdata = testX)
+  testX <- data.frame(testX$coord)
+  names(testX) <- c("PC1","PC2","PC3","PC4","PC5","PC6","PC7","PC8","PC9","PC10")
+
+  tempData <- data.frame(trainY,trainX)
+  names(tempData)[1] <- c("GDP")
+  lm.pca <- lm(GDP ~ ., data = tempData)
+  
+  y_hat <- predict(lm.pca, testX)
+  cor[n] = cor(y_hat, testY)
+  mse[n] <- mean((y_hat - testY)^2)
+}
+result <- data.frame(mse, cor)
+cor
+mse
+```

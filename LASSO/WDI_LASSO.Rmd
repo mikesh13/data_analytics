@@ -1,0 +1,148 @@
+---
+title: "WDI data project"
+author: "Mason Gionet"
+date: "11/25/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd("/Users/studentuser/Downloads")
+data <- read.csv("HDIdata_new.csv")
+```
+
+At first, we look at our dataset through investigating its structure and summary
+```{r}
+str(data)
+```
+As we can see we have a lot of missing values for many of the years. If we want to use a large part of the data set to check for correlations, we need to clean our data set. Thus, we create a function that kills all the variables that do not show data for more than 50% of the time. 
+```{r}
+require(dplyr)
+col_test <- apply(data[,3:length(data)], 2, function(x) sum(is.na(x)))
+col_test <- col_test/nrow(data)
+
+data_test <- cbind(data[,1:2], data %>% select(names(col_test[col_test < 0.3])))
+head(data_test[5:10,])
+
+#Changes need to be applied here as well
+```
+Now, we can check how the function works and look at the resulting data frame:
+Basic tests on regression modelling:
+```{r}
+# remove first four rows for analysis
+cleanData <- data_test[,4:length(data_test)]
+indexClean <- which(complete.cases(cleanData)==TRUE)
+newCleanData <- cleanData[indexClean,]
+
+# setting up dependent variable: NY.GDP.PCAP.KD.ZG
+Y <- newCleanData[, 31]
+
+# removing all GDP measures from independent variables set
+X <- newCleanData[, -(26:33)]
+
+# Bring the variables together 
+analysis_data <- data.frame(Y,X)
+names(analysis_data)[1] = c("NY.GDP.PCAP.KD.ZG")
+
+# Create a training data (80% the original data size)
+train.ix <- sample(nrow(analysis_data),floor(nrow(analysis_data)*0.8))
+data.train <- analysis_data[train.ix,]
+
+# Create a testing data (20% the original data size)
+data.test <- analysis_data[-train.ix,]
+
+# Format data for glmnet package
+# Training:
+trainY <- as.matrix(data.train[,1])
+colnames(trainY) <- names(data.train)[1]
+
+trainX <- data.train[, -1]
+names(trainX) <- names(data.train)[2:length(data.train)]
+
+# Testing:
+testY <- as.matrix(data.test[, 1])
+colnames(testY) <- names(data.test)[1]
+
+testX <- data.test[, -1]
+names(testX) <- names(data.train)[2:length(data.test)]
+```
+What we need to do here:
+1. Define models we want to investigate:
+  1. Lasso Regression for variable selection BEFORE fitting the model, followed by applying selected variables to linear regression model 
+  2. Random forest
+  3. Additional method (to be defined)
+2. Use these models to predict and cross-validate their structure. 
+Build a regression model on this data set
+```{r}
+# load package
+require(glmnet)
+
+# build LASSO model
+fit = glmnet(as.matrix(trainX), trainY, family=c("gaussian"))
+
+# show calculated beta values 
+print(fit$beta)
+
+# plot model to show effect of increasing lambda value
+plot(fit,label = TRUE)
+```
+
+Leave this out. 
+```{r}
+# cross validation fit
+cv.fit = cv.glmnet(as.matrix(trainX),trainY)
+
+# visual effects
+plot(cv.fit)
+```
+
+
+```{r}
+# fitted model with all values?
+cv.fit$lambda.min # cv.fit$lambda.min is the best lambda value --> best model with smallest mean-squared error
+coef(cv.fit, s = "lambda.min") # extracts  fitted regression parameters of the linear regression model using min lambda value. See how sparse it is. 
+y_hat <- predict(cv.fit, newx = testX, s = "lambda.min") # This is to predict using the best model selected by LASSO
+cor(y_hat, data.test$NY.GDP.PCAP.KD.ZG) #For regression model, you can use correlation to measure how close your predictions with the true outcome values of the data points 
+
+mse <- mean((y_hat - data.test$NY.GDP.PCAP.KD.ZG)^2) # Another metric is the mean squared error (mse)
+mse
+```
+
+```{r}
+# fitted model with only non-zero variables post LASSO
+
+var_idx <- which(coef(cv.fit, s = "lambda.min") != 0)
+
+
+
+lm.reduced <- lm(NY.GDP.PCAP.KD.ZG ~ ., data = data.train[,var_idx])
+summary(lm.reduced)
+```
+
+```{r}
+library(ggplot2)
+# calculated predicted values using the reduced linear regression model
+y_hat <- predict.lm(lm.reduced, testX)
+plot(testY, y_hat, main = "Actual vs. Predicted GDP Values", xlim = c(-20, 20), ylim = c(-7, 10))
+plot(y_hat, testY, main = "Actual vs. Predicted GDP Values", xlim = c(15, -15), ylim = c(15, -15))
+# use ggplot
+ggplot(data = data.test, aes(y=y_hat, x=testY) )+geom_point() + xlim(-20,20) + ylim(-7,10)
+# correlation of actual vs. predicted values
+cor(y_hat, testY)
+
+# calculate Mean Squared Error
+MSE <- (y_hat-testY)^2
+mean(MSE)
+```
+
+
+
+
+```{r}
+# calculate Mean Squared Error
+MSE <- (y_hat-testY)^2
+mean(MSE)
+```

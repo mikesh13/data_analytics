@@ -1,0 +1,420 @@
+---
+title: "WDI data project"
+author: "Mason Gionet"
+date: "12/01/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd("/Users/studentuser/Downloads")
+data <- read.csv("HDIdata_new.csv")
+```
+
+At first, we look at our dataset through investigating its structure and summary
+```{r}
+str(data)
+```
+As we can see we have a lot of missing values for many of the years. If we want to use a large part of the data set to check for correlations, we need to clean our data set. Thus, we create a function that kills all the variables that do not show data for more than 50% of the time. 
+```{r}
+require(dplyr)
+col_test <- apply(data[,3:length(data)], 2, function(x) sum(is.na(x)))
+col_test <- col_test/nrow(data)
+
+data_test <- cbind(data[,1:2], data %>% select(names(col_test[col_test < 0.3])))
+head(data_test[5:10,])
+
+```
+Now, we can check how the function works and look at the resulting data frame:
+Basic tests on regression modelling:
+
+
+```{r}
+set.seed(11)
+# remove first four rows for analysis
+indexClean <- which(complete.cases(data_test)==TRUE)
+newCleanData <- data_test[indexClean,]
+# setting up dependent variable: NY.GDP.PCAP.KD.ZG
+Y <- newCleanData[, 34]
+
+# removing all GDP measures from independent variables set
+X <- newCleanData[, -(29:36)]
+
+# Bring the variables together 
+analysis_data <- data.frame(cbind(Y,X))
+names(analysis_data)[1] = c("NY.GDP.PCAP.KD.ZG")
+
+```
+
+```{r}
+# bring in the country information
+#countryData <- read.csv("WDICountry_mod.csv")
+
+# break analysis_data into clusters based on development index
+# which is determined by the 
+# income level = {high = 1, upper middle= 2, lower middle = 2, low = 4}
+#clusterData <- data.frame(cbind(countryData[, 2:4]))
+
+#overall_dataset <- merge(clusterData, analysis_data, by='Country.Code', all.x=TRUE)
+
+# this dataframe is the same, except with "Country.Code", "Short.Name"
+# and "Classsification" at the front
+#overall_dataset <- overall_dataset[, -(5:6)]
+
+```
+
+
+
+
+```{r}
+# binding country code & name
+code_and_name <- paste(overall_dataset[, 1], overall_dataset[,2], sep="")
+
+# removing country.code & short.name
+cleaned <- overall_dataset[, -(1:2)]
+# bring binded version in
+new_overall <- cbind(code_and_name, cleaned)
+# Y vector
+y_vect <- new_overall[,3]
+# removing classification & response columns
+new_overall <- new_overall[, -(2:3)]
+clustering_df <- aggregate(new_overall,by=list(new_overall$code_and_name), FUN=mean)
+names(clustering_df)[1] <- "Short.Name"
+clustering_df <- clustering_df[, -2]
+countryCode <- substring(clustering_df[,1], 1, 3)
+shortName <- substring(clustering_df[,1], 4)
+# this df doesn't includes unique rows for each country
+# using average values for each column
+final_clustering_df <- cbind(countryCode, shortName, clustering_df[,-1])
+
+require(mclust)
+# run clustering on unqiue country df
+unique_country_dataset.clust <- Mclust(final_clustering_df, G=4)
+
+# add classification to clustering_df
+classified_df <- cbind(unique_country_dataset.clust$classification, final_clustering_df)
+names(classified_df)[1] <- "classification"
+# run the clustering on dataset without the response variable
+#overall_dataset.clust <- Mclust(overall_dataset[, -(1:4)], G=4)
+
+# use the new classification method
+# but need to restructure the dataset first
+#classified_df[, 2] <- factor(classified_df[, 2], levels=levels(overall_dataset[,1]))
+rows1 <- classified_df[classified_df$classification==1,(1:3)]
+rows2 <- classified_df[classified_df$classification==2,(1:3)]
+rows3 <- classified_df[classified_df$classification==3,(1:3)]
+rows4 <- classified_df[classified_df$classification==4,(1:3)]
+
+for(i in 1:nrow(overall_dataset)) {
+  if (overall_dataset[i,1] %in% rows1[, 2]) {
+    overall_dataset[i,3] <- 1
+  } else if (overall_dataset[i,1] %in% rows2[, 2]) {
+    overall_dataset[i,3] <- 2
+  } else if(overall_dataset[i,1] %in% rows3[, 2]) {
+    overall_dataset[i,3] <- 3
+  } else {
+    overall_dataset[i,3] <- 4
+  }
+}
+
+
+#write.csv(overall_dataset, "dataset_withCountry.csv")
+#overall_dataset[,3] <- overall_dataset.clust$classification
+```
+
+
+
+```{r}
+overall_dataset <- read.csv("WDICountry_mod.csv")
+############################################# NEW DATA - FIETE'S METHOD
+# Create a training data (80% the original data size)
+train.ix <- read.csv("train_ix.csv")[,1]
+data.train <- overall_dataset[train.ix,]
+# Create a testing data (20% the original data size)
+data.test <- overall_dataset[-train.ix,]
+##################################################
+
+fullTrain <- data.train
+fullTest <- data.test
+
+#clean
+#data.train <- data.train[, -(1:3)]
+#data.test <- data.test[, -(1:3)]
+
+# without country code, name, classification
+overall_dataset_new <- overall_dataset[,-(1:3)]
+
+# High Income
+#train.dataset_one <- data.train[data.train$Classification==1,-(1:3)]
+train.one.ix <- which(data.train$Classification==1)
+train.dataset_one <- data.train[train.one.ix, -(1:4)]
+test.dataset_one <- data.test[data.test$Classification==1,-(1:4)]
+fullTest.dataset.one <- data.test[data.test$Classification==1,]
+
+# Upper Middle Income
+#train.dataset_two <- data.train[data.train$Classification==2,-(1:3)]
+train.two.ix <- which(data.train$Classification==2)
+train.dataset_two <- data.train[train.two.ix, -(1:4)]
+test.dataset_two <- data.test[data.test$Classification==2,-(1:4)]
+fullTest.dataset.two <- data.test[data.test$Classification==2,]
+
+# Lower Middle Income
+#train.dataset_three <- data.train[data.train$Classification==3,-(1:3)]
+train.three.ix <- which(data.train$Classification==3)
+train.dataset_three <- data.train[train.three.ix, -(1:4)]
+test.dataset_three <- data.test[data.test$Classification==3,-(1:4)]
+fullTest.dataset.three <- data.test[data.test$Classification==3,]
+
+# Low Income
+#train.dataset_four <- data.train[data.train$Classification==4,-(1:3)]
+train.four.ix <- which(data.train$Classification==4)
+train.dataset_four <- data.train[train.four.ix, -(1:4)]
+test.dataset_four <- data.test[data.test$Classification==4,-(1:4)]
+fullTest.dataset.four <- data.test[data.test$Classification==4,]
+
+
+data.train <- data.train[, -(1:3)]
+data.test <- data.test[, -(1:3)]
+
+clean.ix1 <- which(complete.cases(data.train)==TRUE)
+data.train <- data.train[clean.ix1, ]
+
+clean.ix2 <- which(complete.cases(data.test)==TRUE)
+data.test <- data.test[clean.ix2, ]
+
+# Format data for glmnet package
+# Training:
+trainY <- as.matrix(data.train[,1])
+colnames(trainY) <- names(overall_dataset_new)[1]
+
+trainX <- data.train[, -1]
+names(trainX) <- names(overall_dataset_new)[2:length(names(overall_dataset_new))]
+
+# Testing:
+testY <- as.matrix(data.test[, 1])
+colnames(testY) <- names(overall_dataset_new)[1]
+
+testX <- data.test[, -1]
+names(testX) <- names(overall_dataset_new)[2:length(names(overall_dataset_new))]
+```
+What we need to do here:
+1. Define models we want to investigate:
+  1. Lasso Regression for variable selection BEFORE fitting the model, followed by applying selected variables to linear regression model 
+  2. Random forest
+  3. Additional method (to be defined)
+2. Use these models to predict and cross-validate their structure. 
+Build a regression model on this data set
+```{r}
+# load package
+require(glmnet)
+
+# build LASSO model -- full dataset
+fit.full <- glmnet(as.matrix(trainX), trainY, family="gaussian")
+
+# build LASSO models for each individual dataset
+fit.one <- glmnet(as.matrix(train.dataset_one[, -1]), train.dataset_one[, 1], family="gaussian")
+fit.two <- glmnet(as.matrix(train.dataset_two[, -1]), train.dataset_two[, 1], family="gaussian")
+fit.three <- glmnet(as.matrix(train.dataset_three[, -1]), train.dataset_three[, 1], family="gaussian")
+fit.four <- glmnet(as.matrix(train.dataset_four[, -1]), train.dataset_four[, 1], family="gaussian")
+
+# show calculated beta values 
+print(fit.full$beta)
+
+# plot model to show effect of increasing lambda value
+plot(fit.full,label = TRUE)
+plot(fit.one,label = TRUE)
+plot(fit.two,label = TRUE)
+plot(fit.three,label = TRUE)
+plot(fit.four,label = TRUE)
+```
+
+Leave this out. 
+```{r}
+# cross validation fit -- full dataset
+cv.fit.full = cv.glmnet(as.matrix(trainX),trainY )
+
+# cross validation fit for each indicidual cluster
+cv.fit.one = cv.glmnet(as.matrix(train.dataset_one[, -1]),train.dataset_one[, 1])
+cv.fit.two = cv.glmnet(as.matrix(train.dataset_two[, -1]),train.dataset_two[, 1])
+cv.fit.three = cv.glmnet(as.matrix(train.dataset_three[, -1]), train.dataset_three[, 1])
+cv.fit.four = cv.glmnet(as.matrix(train.dataset_four[, -1]), train.dataset_four[, 1])
+
+# visual effects
+plot(cv.fit.full)
+plot(cv.fit.one)
+plot(cv.fit.two)
+plot(cv.fit.three)
+plot(cv.fit.four)
+```
+
+
+```{r}
+# fitted model with all values?
+cv.fit.full$lambda.min # cv.fit$lambda.min is the best lambda value --> best model with smallest mean-squared error
+#coef(cv.fit.full, s = "lambda.min") # extracts  fitted regression parameters of the linear regression model using min lambda value. See how sparse it is. 
+
+# test solution from stackoverflow
+#newX <- model.matrix(~.-testY,data=testX)
+#fit_test<-predict(fit, newx=newX,s=lambda_min)
+
+y_hat <- predict(cv.fit.full, testX, s = "lambda.min") # This is to predict using the best model selected by LASSO
+cor(y_hat, data.test$NY.GDP.PCAP.KD.ZG) #For regression model, you can use correlation to measure how close your predictions with the true outcome values of the data points 
+
+mse <- mean((y_hat - data.test$NY.GDP.PCAP.KD.ZG)^2) # Another metric is the mean squared error (mse)
+#mse
+```
+
+```{r}
+# fitted model with only non-zero variables post LASSO
+# overall
+var_idx.full <- which(coef(cv.fit.full, s = "lambda.min") != 0)
+
+# for each cluster
+var_idx.one <- which(coef(cv.fit.one, s = "lambda.min") != 0)
+var_idx.two <- which(coef(cv.fit.two, s = "lambda.min") != 0)
+var_idx.three <- which(coef(cv.fit.three, s = "lambda.min") != 0)
+var_idx.four <- which(coef(cv.fit.four, s = "lambda.min") != 0)
+
+
+# here we need to have 4 different testX sets
+# that we use to build LR models given the set of LASSO
+# variables
+
+# High
+test_one <- test.dataset_one[, -1]
+lm.reduced.one <- lm(NY.GDP.PCAP.KD.ZG ~ ., data = test.dataset_one[,var_idx.one])
+# Upper Middle
+lm.reduced.two <- lm(NY.GDP.PCAP.KD.ZG ~ ., data = test.dataset_two[,var_idx.two])
+# Lower Middle
+lm.reduced.three <- lm(NY.GDP.PCAP.KD.ZG ~ ., data = test.dataset_three[,var_idx.three])
+# Low
+lm.reduced.four <- lm(NY.GDP.PCAP.KD.ZG ~ ., data = test.dataset_four[,var_idx.four])
+
+# Overall 
+lm.reduced.overall <- lm(NY.GDP.PCAP.KD.ZG ~ ., data = data.train[,var_idx.full])
+#summary(lm.reduced.overall)
+#summary(lm.reduced.one)
+```
+
+```{r}
+library(ggplot2)
+# calculated predicted values using the reduced linear regression model
+
+
+y_hat <- predict.lm(lm.reduced.overall, testX)
+plot(testY, y_hat, main = "Actual vs. Predicted GDP Values", xlim = c(-20, 20), 
+     ylim = c(-7, 10), xlab="Actual", ylab="Predicted")
+plot(y_hat, testY, main = "Actual vs. Predicted GDP Values", xlim = c(15, -15), ylim = c(15, -15))
+# use ggplot
+ggplot(data = data.test, aes(y=y_hat, x=testY) )+geom_point() + xlim(-17,20) + ylim(10, -5)
+# correlation of actual vs. predicted values
+cor(y_hat, testY)
+
+# Fiete's version
+p <- ggplot(data=data.test, aes(y=y_hat, x=testY)) + geom_point() + xlim(-20,20) + ylim(-7,10) + xlab("True Y") + ylab("Predicted Y") + theme(text = element_text(size=20))
+p + labs(title = "Full Data model")
+# calculate Mean Squared Error
+MSE_overall <- (y_hat-testY)^2
+mean(MSE_overall)
+```
+
+
+
+
+```{r}
+# calculate Mean Squared Error for each cluster
+MSE_val <- vector(mode = "numeric", length = 4)
+cor_val <- vector(mode = "numeric", length = 4)
+
+# for each clusert the col "prediction" is the predicted values using
+# that unique model. I did this to make it much easier to bring the models together
+# for evaluation & visualizations
+
+# Cluster 1
+prediction <- predict.lm(lm.reduced.one, test.dataset_one[,-1])
+MSE <- (prediction-test.dataset_one[1])^2
+MSE_val[1] <- mean(as.matrix(MSE))
+cor_val[1] <- cor(test.dataset_one[1], prediction)
+data.one <- cbind(prediction, fullTest.dataset.one[, 1:4], MSE[,1])
+# Plot
+p1 <- ggplot(data=test.dataset_one, aes(y=prediction, x=as.numeric(unlist(test.dataset_one[1])))) + geom_point() + xlim(-20,20) + ylim(-7,10) + xlab("True Y") + ylab("Predicted Y") + theme(text = element_text(size=20))
+p1 + labs(title = "Cluster 1")
+p1
+
+
+# Cluster 2
+prediction <- predict.lm(lm.reduced.two, test.dataset_two[,-1])
+MSE <- (prediction-test.dataset_two[1])^2
+MSE_val[2] <- mean(as.matrix(MSE))
+cor_val[2] <- cor(test.dataset_two[1], prediction)
+data.two <- cbind(prediction, fullTest.dataset.two[, 1:4], MSE[,1])
+# Plot
+p2 <- ggplot(data=test.dataset_two[1], aes(y=prediction, x=as.numeric(unlist(test.dataset_two[1])))) + geom_point() + xlim(-20,20) + ylim(-7,10) + xlab("True Y") + ylab("Predicted Y") + theme(text = element_text(size=20))
+p2 + labs(title = "Cluster 2")
+p2
+
+
+# Cluster 3
+prediction <- predict.lm(lm.reduced.three, test.dataset_three[,-1])
+MSE <- (prediction-test.dataset_three[1])^2
+MSE_val[3] <- mean(as.matrix(MSE))
+cor_val[3] <- cor(test.dataset_three[1], prediction)
+data.three <- cbind(prediction, fullTest.dataset.three[, 1:4], MSE[,1])
+# Plot
+p3 <- ggplot(data=test.dataset_three[1], aes(y=prediction, x=as.numeric(unlist(test.dataset_three[1])))) + geom_point() + xlim(-20,20) + ylim(-7,10) + xlab("True Y") + ylab("Predicted Y") + theme(text = element_text(size=20))
+p3 + labs(title = "Cluster 3")
+p3
+
+# cluster 3
+prediction <- predict.lm(lm.reduced.four, test.dataset_four[,-1])
+MSE <- (prediction-test.dataset_four[1])^2
+MSE_val[4] <- mean(as.matrix(MSE))
+cor_val[4] <- cor(test.dataset_four[1], prediction)
+data.four <- cbind(prediction, fullTest.dataset.four[, 1:4], MSE[,1])
+# Plot
+p4 <- ggplot(data=test.dataset_four[1], aes(y=prediction, x=as.numeric(unlist(test.dataset_four[1])))) + geom_point() + xlim(-20,20) + ylim(-7,10) + xlab("True Y") + ylab("Predicted Y") + theme(text = element_text(size=20))
+p4 + labs(title = "Cluster 4")
+p4
+
+# all MSE values
+MSE_val
+
+# Data frame of all the results
+dataComp1 <- rbind(data.one, data.two, data.three, data.four)
+# removing all rows with MSE > 50
+# which removes 63 rows, 6.5% of test_dataset
+#dataComp1 <- dataComp1[dataComp1$`MSE[, 1]`< 50,]
+
+# removed the last
+#dataComp2 <- merge(data.lowMid, data.low, by="Country.Code")
+#dataCompOverall <- merge(dataComp1, dataComp2, by="Country.Code")
+
+# now show sample size for each
+size <- c(nrow(test.dataset_one), nrow(test.dataset_two), nrow(test.dataset_three), nrow(test.dataset_four))
+size
+```
+
+
+```{r}
+# Export results
+#write.csv(dataComp1, "dataComparison_clustering2.csv")
+
+boxplot(dataComp1$`MSE[, 1]`~dataComp1$Classification,dataComp1, xlab="Cluster", ylab="MSE", main="Cluster MSE Comparison", ylim=c(0,40))
+
+boxplot(as.numeric(fullData_MSE$MSE) ~ fullData_MSE$Classification, fullData_MSE, xlab="Cluster", ylab="MSE", main="Cluster MSE Comparison", ylim=c(0,40), add=TRUE)
+
+fullData_MSE <- data.frame(cbind(MSE_overall, c(rep("overall", length(MSE_overall)))))
+colnames(fullData_MSE)<- c("MSE", "Classification")
+
+new_ClusterComp <- data.frame(cbind(as.numeric(dataComp1$`MSE[, 1]`), dataComp1$Classification))
+colnames(new_ClusterComp) <- c("MSE", "Classification")
+
+MSE_comparison <- rbind(fullData_MSE, new_ClusterComp)
+MSE_comparison$MSE <- as.numeric(as.character(MSE_comparison$MSE))
+MSE_comparison$Classification <- as.character(MSE_comparison$Classification)
+
+boxplot(MSE_comparison$MSE~MSE_comparison$Classification,MSE_comparison, xlab="Cluster", ylab="MSE", main="Cluster MSE Comparison", ylim=c(0,40))
+```

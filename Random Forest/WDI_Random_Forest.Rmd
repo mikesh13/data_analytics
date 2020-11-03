@@ -1,0 +1,176 @@
+---
+title: "WDI data project"
+author: "Klaas Fiete Krutein"
+date: "10/30/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd("/Users/fietekrutein/Documents/University/University of Washington/Courses/2018 Q4/IND E 498/Project")
+data <- read.csv("HDIdata_new.csv")
+```
+
+At first, we look at our dataset through investigating its structure and summary
+```{r}
+str(data)
+```
+As we can see we have a lot of missing values for many of the years. If we want to use a large part of the data set to check for correlations, we need to clean our data set. Thus, we create a function that kills all the variables that do not show data for more than 50% of the time. 
+```{r}
+library(dplyr)
+col_test <- apply(data[,3:length(data)], 2, function(x) sum(is.na(x)))
+col_test <- col_test/nrow(data)
+# We select only columns where the number of NA values is not too small < 30%
+data_test <- cbind(data[,1:2], data %>% select(names(col_test[col_test < 0.3])))
+# Now we kick out the variables that are closely related to our variable of interest as we want to avoid colinearity effects
+drops <- c("NY.GDP.MKTP.KD", "NY.GDP.MKTP.CD", "NY.GDP.MKTP.KD.ZG", "NY.GDP.PCAP.KD", "NY.GDP.PCAP.CD")
+data_test <- data_test[, !(names(data_test) %in% drops)]
+head(data_test[5:10,])
+```
+Now, we can check how the function works and look at the resulting data frame:
+Basic tests on regression modelling:
+```{r}
+# Create a training data (80% the original data size)
+train.ix <- sample(nrow(data_test),floor(nrow(data)*0.8))
+data.train <- data_test[train.ix,4:length(data_test)]
+
+# Create a testing data (20% the original data size)
+data.test <- data_test[-train.ix,4:length(data_test)]
+```
+What we need to do here:
+1. Define models we want to investigate:
+  1. Lasso Regression for variable selection BEFORE fitting the model, followed by applying selected variables to linear regression model 
+  2. Random forest
+  3. Additional method (to be defined)
+2. Use these models to predict and cross-validate their structure. 
+
+Build a random forest on this data set
+```{r}
+# Build a random forest on a numeric dependent variable
+library(dplyr)
+data.train <- data.train %>% filter(!is.na(data.train$NY.GDP.PCAP.KD.ZG))
+
+library(randomForest)
+rf.AD <- randomForest(NY.GDP.PCAP.KD.ZG ~ ., data = data.train, ntree = 200, nodesize = 20, mtry = 5, na.action=na.exclude) 
+
+# Display the random forest
+rf.AD
+
+# Check the error
+mean(rf.AD$err.rate[,"OOB"])
+```
+
+```{r}
+# Select best models using cross validation
+n_folds = 10 # 10 folds cross validation
+N <- dim(data.train)[1] # the sample size, N, of the dataset
+folds_i <- sample(rep(1:n_folds, length.out = N)) 
+# Sequence for depth of trees
+min_size <- c(20, 25, 30, 35, 40, 45, 50, 55)
+# Select feature range between log(no. of features) and sqrt(no. of features)
+no.features <- c(5, 6, 7, 8, 9, 10, 11, 12)
+# Select tree number range
+no.trees <- c(50, 100, 150, 200, 250, 300)
+# Build a matrix to hold MSE values per tree tuning
+tree_mse <- array(dim=c(length(no.features), length(min_size), length(no.trees)))
+# Hold raw values inside a frame
+tree_errors <- matrix(NA, n_folds, 1)
+# Hold column names and rownames in final data frame
+colnames(tree_mse) <- as.character(min_size)
+rownames(tree_mse) <- as.character(no.features)
+# Run through all potential combinations of tuning and save the MSE
+for (t in 1:length(no.trees)){
+  for (f in 1:length(no.features)){
+    for (i in 1:length(min_size)){
+      tree_errors <- matrix(NA, n_folds, 1)
+      for (k in 1:n_folds){
+        test_i <- which(folds_i == k) # In each iteration of the 10 iterations, remember, we use one fold of data as the testing data
+        data.train.cv <- data.train[-test_i, ] # Then, the remaining 9 folds' data form our training data
+        data.test.cv <- data.train[test_i, ] # This is the testing data, from the ith fold
+        rf.AD <- randomForest(NY.GDP.PCAP.KD.ZG ~ ., data = data.train.cv, ntree = no.trees[t], na.action=na.exclude, 
+                              minbucket=min_size[i], mtry=no.features[f]) # Fit the linear model 
+        y_hat <- predict(rf.AD, data.test.cv,type="class") # Predict on the testing data using the trained model
+        true_y <- data.test.cv$NY.GDP.PCAP.KD.ZG # Get the true y values for the testing data
+        tree_errors[k,] <- mean((y_hat-true_y)^2, na.rm=TRUE)
+      }
+      tree_mse[f,i,t] <- mean(tree_errors)
+    }
+  }
+}
+# Write the output to a csv file to avoid losing the information
+write.csv(tree_mse, file="MSE_matrix.csv")
+# We can now check for the min value that will give us the lowest MSE
+opt <- which(tree_mse == min(tree_mse), arr.ind = TRUE)
+print(opt)
+write.csv(opt, file="optimal_tree.csv")
+```
+
+```{r}
+# Now, we can use it to predict the data set using the best tree based on MSE
+#rf.AD <- randomForest(NY.GDP.PCAP.KD.ZG ~ ., data = data.train, ntree = no.trees[opt[,3]], na.action=na.exclude, 
+#                            minbucket=min_size[opt[,2]], mtry=no.features[opt[,1]])
+rf.AD_fin <- randomForest(NY.GDP.PCAP.KD.ZG ~ ., data = data.train, ntree = 100, na.action=na.exclude, 
+                            minbucket=40, mtry=10)
+y_hat <- predict(rf.AD, data.test,type="response")
+data <- as.data.frame(y_hat, data.test$NY.GDP.PCAP.KD.ZG)
+
+# plot the response prediction
+library(ggplot2)
+plot(y_hat ~ data.test$NY.GDP.PCAP.KD.ZG, ylim=c(-7,10), xlim=c(-20,20))
+ggplot(data=data, aes(y=y_hat, x=data.test$NY.GDP.PCAP.KD.ZG)) + geom_point() + xlim(-20,20) + ylim(-7,10)
+# print(cor(y_hat, data.test$NY.GDP.PCAP.KD.ZG))
+```
+
+```{r}
+MSE <- read.csv("MSE_matrix_save.csv")
+MSE <- as.data.frame(t(MSE))
+colnames(MSE) <- MSE[1,]
+MSE <- MSE[-1,]
+library(reshape2)
+library(dplyr)
+library(tidyverse)
+MSE <- rownames_to_column(MSE)
+MSE$trees <- c(rep(50,8), rep(100,8), rep(150,8), rep(200,8), rep(250,8), rep(300,8))
+MSE$min_size <- NA
+MSE[grep("20",MSE$rowname),]$min_size <- 20
+MSE[grep("25",MSE$rowname),]$min_size <- 25
+MSE[grep("30",MSE$rowname),]$min_size <- 30
+MSE[grep("35",MSE$rowname),]$min_size <- 35
+MSE[grep("40",MSE$rowname),]$min_size <- 40
+MSE[grep("45",MSE$rowname),]$min_size <- 45
+MSE[grep("50",MSE$rowname),]$min_size <- 50
+MSE[grep("55",MSE$rowname),]$min_size <- 55
+MSE <- MSE[,-1]
+# Stack them into one column
+MSE_frame <- melt(MSE, id.vars=9:10)
+colnames(MSE_frame) <- c("trees", "bucket_min", "no_features", "MSE")
+
+library(ggplot2)
+require(gridExtra)
+plot1 <- ggplot(data=MSE_frame, aes(x=trees, y=MSE, color=no_features)) + geom_point() + geom_smooth(method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)
+plot2 <- ggplot(data=MSE_frame, aes(x=bucket_min, y=MSE, color=trees)) + geom_point() + geom_smooth(method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)
+plot3 <- ggplot(data=MSE_frame, aes(x=no_features, y=MSE, color=trees)) + geom_point() + geom_smooth(method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)
+grid.arrange(plot1, plot2, plot3, ncol=2, nrow=2)
+
+library(plotly)
+plot_ly(MSE_frame, x = ~trees, y = ~no_features, z = ~MSE, marker = list(color = ~bucket_min, colorscale = c('#FFE1A1', '#683531'), showscale = TRUE)) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'Number of trees'),
+                     yaxis = list(title = 'Number of features'),
+                     zaxis = list(title = 'MSE')),
+         annotations = list(
+           x = 1.13,
+           y = 1.05,
+           text = 'Minimum number of buckets',
+           xref = 'paper',
+           yref = 'paper',
+           showarrow = FALSE
+         ))
+```
+
+
+
+

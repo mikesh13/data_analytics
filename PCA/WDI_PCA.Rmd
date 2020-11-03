@@ -1,0 +1,92 @@
+---
+title: "Project_PCA"
+author: "Michael Shieh"
+date: "11/19/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+data <- read.csv("HDIdata_new.csv")
+#str(data)
+
+require(dplyr)
+col_test <- apply(data[,3:length(data)], 2, function(x) sum(is.na(x)))
+col_test <- col_test/nrow(data)
+
+data_test <- cbind(data[,1:2], data %>% select(names(col_test[col_test < 0.3])))
+head(data_test[5:10,])
+
+```
+
+
+```{r}
+#Deleting N/A values
+cleanData <- data_test[,4:length(data_test)]
+indexClean <- which(complete.cases(CleanData)==TRUE)
+CleanData <- CleanData[indexClean,]
+colIndexNumeric <- which(sapply(CleanData, class) == "numeric")
+CleanData <- CleanData[, colIndexNumeric]
+
+#Select NY.GDP.PCAP.KD.ZG as Y
+Y <- CleanData[, 31]
+X <- CleanData[, -31]
+
+#Exclude columns whose names contain "GDP"
+#GDP_index = c(26:33)
+#X <- CleanData[, -GDP_index]
+
+#Conduct dataset
+PCA_data <- data.frame(Y,X)
+names(PCA_data)[1] = c("GDP")
+```
+
+
+```{r}
+#Create training and testing dataset
+train.ix <- sample(nrow(PCA_data), floor(nrow(PCA_data)) * 4 / 5 )
+PCA_data.train <- PCA_data[train.ix,]
+PCA_data.test <- PCA_data[-train.ix,]
+
+trainX <- as.matrix(PCA_data.train[,-1])
+testX <- as.matrix(PCA_data.test[,-1])
+trainY <- as.matrix(PCA_data.train[,1])
+testY <- as.matrix(PCA_data.test[,1])
+```
+
+
+```{r}
+#Implement principal component analysis 
+require(FactoMineR)
+pca <- PCA(trainX, graph = FALSE, ncp = 10)
+require(factoextra)
+fviz_screeplot(pca, addlabels = TRUE, ylim = c(0, 50))
+var <- get_pca_var(pca)
+head(var$contrib)
+fviz_contrib(pca, choice = "var", axes = 1, top = 20)
+fviz_contrib(pca, choice = "var", axes = 2, top = 20)
+fviz_contrib(pca, choice = "var", axes = 3, top = 20)
+```
+
+```{r}
+#Use the transformed data in the space spanned by PCs to fit models. e.g., below is to fit a line regression model
+trainX <- pca$ind$coord # Do transformation of the X matrix of training data
+trainX <- data.frame(trainX)
+names(trainX) <- c("PC1","PC2","PC3","PC4","PC5","PC6","PC7","PC8","PC9","PC10")
+testX <- predict(pca, newdata = testX) # Do transformation of the X matrix of testing data
+testX <- data.frame(testX$coord)
+names(testX) <- c("PC1","PC2","PC3","PC4","PC5","PC6","PC7","PC8","PC9","PC10")
+
+tempData <- data.frame(trainY,trainX)
+names(tempData)[1] <- c("GDP")
+lm.AD <- lm(GDP ~ ., data = tempData)
+summary(lm.AD)
+
+y_hat <- predict(lm.AD, testX) 
+cor(y_hat, testY) #For regression model, you can use correlation to measure how close your predictions with the true outcome values of the data points 
+mse <- mean((y_hat - testY)^2) # Another metric is the mean squared error (mse)
+mse
+```

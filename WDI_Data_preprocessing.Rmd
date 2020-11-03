@@ -1,0 +1,65 @@
+---
+title: "WDI data project"
+author: "Klaas Fiete Krutein"
+date: "10/30/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd("/Users/HFSM/Documents/University/University of Washington/Courses/2018 Q4/IND E 498/Project")
+data <- read.csv("HDIdata_new.csv")
+```
+
+At first, we look at our dataset through investigating its structure and summary
+```{r}
+str(data)
+```
+As we can see we have a lot of missing values for many of the years. If we want to use a large part of the data set to check for correlations, we need to clean our data set. Thus, we create a function that kills all the variables that do not show data for more than 50% of the time. 
+```{r}
+library(dplyr)
+col_test <- apply(data[,3:length(data)], 2, function(x) sum(is.na(x)))
+col_test <- col_test/nrow(data)
+
+data_test <- cbind(data[,1:2], data %>% select(names(col_test[col_test < 0.3])))
+head(data_test[5:10,])
+
+#Changes need to be applied here as well
+```
+Now, we can check how the function works and look at the resulting data frame:
+Basic tests on regression modelling:
+```{r}
+# Create a training data (half the original data size)
+train.ix <- sample(nrow(data_test),floor(nrow(data)/2))
+data.train <- data_test[train.ix,4:length(data_test)]
+GDPno_nas <- rownames(data.train)[!is.na(data.train$NY.GDP.PCAP.KD.ZG)]
+data.GDP_nonas <- data.train[GDPno_nas,]
+
+# Create a subset of data with only non-NAs in the response (this is not working properly right now)
+col_test2 <- apply(data.GDP_nonas, 2, function(x) sum(is.na(x)))
+col_test2 <- col_test2/nrow(data.GDP_nonas)
+library(dplyr)
+data.train2 <-  data.train %>% select(names(col_test2[col_test2 < 0.2]))
+
+#Changes need to be applied here as welll
+# 3:length(data_test)
+# Create a testing data (half the original data size)
+data.test <- data_test[-train.ix,4:length(data_test)]
+```
+Build a regression model on this data set
+```{r}
+lm.AD <- lm(NY.GDP.PCAP.KD.ZG ~ ., data = data.train2)
+summary(lm.AD)
+# We need to get a data frame that has no pure NA-values for all response related data points.
+```
+
+
+```{r}
+lm.AD.reduced <- step(lm.AD, direction="backward", test="F")
+```
+
+
+
